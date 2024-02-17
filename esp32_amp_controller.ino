@@ -409,7 +409,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     };
     xhttp.open("GET", "/powerState", true);
     xhttp.send();
-  }, 100);
+  }, 500);
   setInterval(function ( ) {
     var xhttp = new XMLHttpRequest();
     xhttp.onreadystatechange = function() {
@@ -428,7 +428,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     };
     xhttp.open("GET", "/protectionState", true);
     xhttp.send();
-  }, 100);
+  }, 500);
   </script>
   </body>
   </html>)rawliteral";
@@ -458,7 +458,7 @@ const char menu_html[] PROGMEM = R"rawliteral(
         <form action="/get">
           <p>Voltage to calculate coeff: <input type="text" name="inputVoltage" id="inputVoltage" value="%INPUTVOLTAGE%"> <input type="submit" value="Submit"></p>
         </form>
-        <p>Timers and delays: </p>
+        <p>Timers and delays in milliseconds: </p>
         <form action="/get">
           <p>Alarm reset time: <input type="text" name="alarmaTickTimer" id="alarmaTickTimer" value="%ALARMATICKTIMER%"> <input type="submit" value="Submit"></p>
         </form>
@@ -466,7 +466,7 @@ const char menu_html[] PROGMEM = R"rawliteral(
           <p>Web page: <input type="text" name="webTimerDelay" id="webTimerDelay" value="%WEBTIMERDELAY%"> <input type="submit" value="Submit"></p>
         </form>
         <form action="/get">
-          <p>Protectuion check: <input type="text" name="guardTimerDelay" id="guardTimerDelay" value="%GUARDTIMERDELAY%"> <input type="submit" value="Submit"></p>
+          <p>Protection delay (between each check of 3 checks before alarm): <input type="text" name="guardTimerDelay" id="guardTimerDelay" value="%GUARDTIMERDELAY%"> <input type="submit" value="Submit"></p>
         </form>
         <form action="/get">
           <p>Temp check: <input type="text" name="guardTempDelay" id="guardTempDelay" value="%GUARDTEMPDELAY%"> <input type="submit" value="Submit"></p>
@@ -506,7 +506,7 @@ void setup() {
   powerEnabled = preferences.getBool("defaultEnabled", 0);
   protectionEnabled = preferences.getBool("protectionEnabled", 1);
   webTimerDelay = preferences.getInt("webTimerDelay", 500);
-  guardTimerDelay = preferences.getInt("guardTimerDelay", 10);
+  guardTimerDelay = preferences.getInt("guardTimerDelay", 15);
   guardTempDelay = preferences.getInt("guardTempDelay", 8000);
   inputVoltage = preferences.getFloat("inputVoltage", 13.8);
     ArduinoOTA
@@ -657,7 +657,7 @@ void setup() {
       inputParam = "webTimerDelay";
       webTimerDelay = inputMessage.toInt();
       preferences.begin("file", false);
-      preferences.putBool("webTimerDelay", inputMessage.toInt());
+      preferences.putInt("webTimerDelay", inputMessage.toInt());
       preferences.end();
     }
     else if (request->hasParam("guardTimerDelay")) {
@@ -665,7 +665,7 @@ void setup() {
       inputParam = "guardTimerDelay";
       guardTimerDelay = inputMessage.toInt();
       preferences.begin("file", false);
-      preferences.putBool("guardTimerDelay", inputMessage.toInt());
+      preferences.putInt("guardTimerDelay", inputMessage.toInt());
       preferences.end();
     }
     else if (request->hasParam("guardTempDelay")) {
@@ -673,7 +673,7 @@ void setup() {
       inputParam = "guardTempDelay";
       guardTempDelay = inputMessage.toInt();
       preferences.begin("file", false);
-      preferences.putBool("guardTempDelay", inputMessage.toInt());
+      preferences.putInt("guardTempDelay", inputMessage.toInt());
       preferences.end();
     }
     else if (request->hasParam("inputVoltage")) {
@@ -681,7 +681,7 @@ void setup() {
       inputParam = "inputVoltage";
       inputVoltage = inputMessage.toFloat();
       preferences.begin("file", false);
-      preferences.putBool("inputVoltage", inputMessage.toFloat());
+      preferences.putFloat("inputVoltage", inputMessage.toFloat());
       preferences.end();
     }
     else {
@@ -755,7 +755,7 @@ void loop() {
       Serial.println("F! Overcurrent Alarm! Current: " + String(current));
     }
 
-    if (powerCoeff < minCoeff ) {
+    if ((powerCoeff < minCoeff) && (protectionEnabled)){
       if (alarmatick > 3) {
         digitalWrite(AMP_POWER, LOW);
         powerEnabled = false;
