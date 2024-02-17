@@ -14,7 +14,7 @@ To connect to wi-fi it's using wifi-manager (https://github.com/tzapu/WiFiManage
 <br />
 It has OTA firmware upgrade ability and can save setting to the EEPROM.
 <br /><br />
-Addirional info and history: [My site](https://enthru.net/?tag=amp_controller)
+Additional info and history: [My site](https://enthru.net/?tag=amp_controller)
 <br /><br />
 **Menu parameters description:**
 <br />
