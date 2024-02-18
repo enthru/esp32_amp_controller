@@ -58,6 +58,7 @@ int minCoeff;
 int alarmaTickTimer;
 bool changed = true;
 int PWMValue;
+int basePWMValue;
 int fanIncrement = 155;
 
 int alarmatick = 0;
@@ -76,6 +77,10 @@ OneWire oneWire(TEMP1_SENSOR);
 DeviceAddress sensor1 = { 0x28, 0xCA, 0xBA, 0x55, 0x5, 0x0, 0x0, 0xD0 };
 DallasTemperature sensors(&oneWire);
 float temp1 = 0.0;
+int zeroTemp;
+
+//enable mac PWM when ptt
+bool maxPWMPTT;
 
 AsyncWebServer server(80);
 AsyncEventSource events("/events");
@@ -227,8 +232,8 @@ String menu_processor(const String& var){
   else if(var == "MAXSWR"){
     return String(maxSWR);
   }
-  else if(var == "PWMVALUE"){
-    return String(PWMValue);
+  else if(var == "BASEPWMVALUE"){
+    return String(basePWMValue);
   }
   else if(var == "DEFAULTENABLED"){
     return String(powerEnabled);
@@ -244,6 +249,9 @@ String menu_processor(const String& var){
   }
   else if(var == "INPUTVOLTAGE"){
     return String(inputVoltage);
+  }
+  else if(var == "MAXPWMPTT"){
+    return String(maxPWMPTT);
   }
   return String();
 }
@@ -273,7 +281,7 @@ const char index_html[] PROGMEM = R"rawliteral(
   <body>
     <div class="topnav" id="topnava">
       <h1>Main screen</h1>
-      <span id="millis"></span>
+      <span id="headerinfo"></span>
     </div>
     <div class="content">
       <div class="cards">
@@ -327,9 +335,9 @@ const char index_html[] PROGMEM = R"rawliteral(
     console.log("message", e.data);
   }, false);
 
-  source.addEventListener('millis', function(e) {
-    console.log("millis", e.data);
-    document.getElementById("millis").innerHTML = e.data;
+  source.addEventListener('headerinfo', function(e) {
+    console.log("headerinfo", e.data);
+    document.getElementById("headerinfo").innerHTML = e.data;
   }, false);
 
   source.addEventListener('navcolor', function(e) {
@@ -450,10 +458,13 @@ const char menu_html[] PROGMEM = R"rawliteral(
           <p>Max SWR: <input type="text" name="maxSWR" id="maxSWR" value="%MAXSWR%"> <input type="submit" value="Submit"></p>
         </form>
         <form action="/get">
-          <p>Base PWM: <input type="text" name="PWMValue" id="PWMValue" value="%PWMVALUE%"> <input type="submit" value="Submit"></p>
+          <p>Base PWM: <input type="text" name="basePWMValue" id="basePWMValue" value="%BASEPWMVALUE%"> <input type="submit" value="Submit"></p>
         </form>
         <form action="/get">
           <p>Default enabled: <input type="text" name="defaultEnabled" id="defaultEnabled" value="%DEFAULTENABLED%"> <input type="submit" value="Submit"></p>
+        </form>
+        <form action="/get">
+          <p>Max PWM on PTT: <input type="text" name="maxPWMPTT" id="maxPWMPTT" value="%MAXPWMPTT%"> <input type="submit" value="Submit"></p>
         </form>
         <form action="/get">
           <p>Voltage to calculate coeff: <input type="text" name="inputVoltage" id="inputVoltage" value="%INPUTVOLTAGE%"> <input type="submit" value="Submit"></p>
@@ -502,11 +513,12 @@ void setup() {
   maxCurrent = preferences.getFloat("maxCurrent", 17.0);
   maxSWR = preferences.getFloat("maxSWR", 2.0);
   minCoeff = preferences.getInt("minCoeff", 44);
-  PWMValue = preferences.getInt("PWMValue", 100);
+  basePWMValue = preferences.getInt("basePWMValue", 70);
   powerEnabled = preferences.getBool("defaultEnabled", 0);
   protectionEnabled = preferences.getBool("protectionEnabled", 1);
+  maxPWMPTT = preferences.getBool("maxPWMPTT", 0);
   webTimerDelay = preferences.getInt("webTimerDelay", 500);
-  guardTimerDelay = preferences.getInt("guardTimerDelay", 15);
+  guardTimerDelay = preferences.getInt("guardTimerDelay", 50);
   guardTempDelay = preferences.getInt("guardTempDelay", 8000);
   inputVoltage = preferences.getFloat("inputVoltage", 13.8);
     ArduinoOTA
@@ -637,12 +649,12 @@ void setup() {
       preferences.putInt("minCoeff", inputMessage.toInt());
       preferences.end();
     }
-    else if (request->hasParam("PWMValue")) {
-      inputMessage = request->getParam("PWMValue")->value();
-      inputParam = "PWMValue";
-      PWMValue = inputMessage.toInt();
+    else if (request->hasParam("basePWMValue")) {
+      inputMessage = request->getParam("basePWMValue")->value();
+      inputParam = "basePWMValue";
+      basePWMValue = inputMessage.toInt();
       preferences.begin("file", false);
-      preferences.putInt("PWMValue", inputMessage.toInt());
+      preferences.putInt("basePWMValue", inputMessage.toInt());
       preferences.end();
     }
     else if (request->hasParam("defaultEnabled")) {
@@ -650,6 +662,14 @@ void setup() {
       inputParam = "defaultEnabled";
       preferences.begin("file", false);
       preferences.putBool("defaultEnabled", inputMessage.toInt());
+      preferences.end();
+    }
+    else if (request->hasParam("maxPWMPTT")) {
+      inputMessage = request->getParam("maxPWMPTT")->value();
+      inputParam = "maxPWMPTT";
+      maxPWMPTT = inputMessage.toInt();
+      preferences.begin("file", false);
+      preferences.putBool("maxPWMPTT", inputMessage.toInt());
       preferences.end();
     }
     else if (request->hasParam("webTimerDelay")) {
@@ -707,13 +727,15 @@ void setup() {
 }
 
 void loop() {
-  if (digitalRead(PTT_PIN)) {
+  if ((digitalRead(PTT_PIN)) && maxPWMPTT) {
     ledcWrite(PWM_CHANNEL, 255);
+    PWMValue = 255;
   }
   else {
     ledcWrite(PWM_CHANNEL, PWMValue);
   }
-    ArduinoOTA.handle();
+
+  ArduinoOTA.handle();
 
   //temp delay
   if ((millis() - tempLastTime) > guardTempDelay) {
@@ -721,6 +743,12 @@ void loop() {
     temp1 = sensors.getTempCByIndex(0);
     events.send(String(temp1).c_str(),"temp1",millis());
     tempLastTime = millis();
+    //set pwm based on temp
+    zeroTemp = (int)temp1 - 25;
+    if (zeroTemp < 1) { zeroTemp = 1; } else if (zeroTemp > 35) { zeroTemp = 35; }
+    PWMValue = zeroTemp * 10 + basePWMValue;
+    if (PWMValue > 255) { PWMValue = 255; }
+    ledcWrite(PWM_CHANNEL, PWMValue);
   }
 
   //protection delay
@@ -783,11 +811,11 @@ void loop() {
     int secsRemaining = allSeconds%3600;
     int runMinutes = secsRemaining/60;
     int runSeconds = secsRemaining%60;
-    char buf[21];
-    sprintf(buf,"Uptime: %02d:%02d:%02d",runHours,runMinutes,runSeconds);
+    char buf[30];
+    sprintf(buf,"Uptime: %02d:%02d:%02d PWM: %d",runHours,runMinutes,runSeconds,PWMValue);
     getSensorReadings();
     events.send("ping",NULL,millis());
-    events.send(String(buf).c_str(),"millis",millis());
+    events.send(String(buf).c_str(),"headerinfo",millis());
     events.send(String(fwdPower).c_str(),"forward",millis());
     events.send(String(refPower).c_str(),"reflected",millis());
     if (alarma) {
@@ -812,7 +840,7 @@ void loop() {
     events.send(String(protectionState).c_str(),"protectionstate",millis());
     events.send(String(current).c_str(),"current",millis());
     events.send(String(alarmType).c_str(),"alarma",millis());
-    events.send(String(PWMValue).c_str(),"PWMValue",millis());
+    //events.send(String(PWMValue).c_str(),"PWMValue",millis());
     if (powerCoeff == 100.0) {
       events.send(String("Unknown").c_str(),"powerCoeff",millis());
     }
