@@ -32,9 +32,13 @@ String strSWR;
 float powerCoeff = 0.00;
 
 bool powerEnabled;
-bool protectionEnabled = true;
+bool defaultEnabled;
+bool protectionEnabled;
+bool tvertEnabled;
+
 String powerState = "unknown";
 String protectionState = "unknown";
+String tvertState = "unknown";
 
 bool alarma = false;
 String alarmType = "none";
@@ -46,9 +50,8 @@ String alarmType = "none";
 #define PWM_CHANNEL 0
 #define PWM_FREQ 5000
 #define PWM_RESOLUTION 8
-
 #define PTT_PIN 5
-#define HALL_PIN 4 
+#define XVERT_PIN 4 
 
 float inputVoltage;
 #define MIN_POWER 1.0
@@ -65,12 +68,14 @@ int alarmatick = 0;
 
 //ACS785
 const float SENSITIVITY = 0.04;
-const float OFFSET_VOLT = 2.472;
+const float OFFSET_VOLT = 2.472; //half of 5v real voltage
+const float VOLT_PER_COUNT = 0.0001875; //5v real divided by adc counts
 float current = 0.00;
 float adcVoltage = 0.00;
 
 const char* PARAM_INPUT_1 = "powerState";
 const char* PARAM_INPUT_2 = "protectionState";
+const char* PARAM_INPUT_3 = "tvertState";
 
 //temp1
 OneWire oneWire(TEMP1_SENSOR);
@@ -96,6 +101,7 @@ unsigned int guardTempDelay;
 //checkbox with powerbutton
 String powerStateValue;
 String protectionStateValue;
+String tvertStateValue;
 
 //webserver update
 String inputMessage;
@@ -103,10 +109,10 @@ String inputParam;
 
 void getSensorReadings(){
   //swr and power
-  adc0 = ads.readADC_SingleEnded(0);
-  adc1 = ads.readADC_SingleEnded(1);
-  fwdVoltage = (adc0 * 0.1875)/1000;
-  refVoltage = (adc1 * 0.1875)/1000;
+  adc0 = ads.readADC_SingleEnded(1);
+  adc1 = ads.readADC_SingleEnded(0);
+  fwdVoltage = adc0 * VOLT_PER_COUNT;
+  refVoltage = adc1 * VOLT_PER_COUNT;
   realVoltage = fwdVoltage*20;
   squareVoltage = realVoltage*realVoltage;
   fwdPower = (squareVoltage/50)*0.7;
@@ -122,7 +128,7 @@ void getSensorReadings(){
   
   //current sensor
   adc2 = ads.readADC_SingleEnded(2);
-  adcVoltage = (adc2 * 0.1875)/1000;
+  adcVoltage = adc2 * VOLT_PER_COUNT;
   current = (adcVoltage - OFFSET_VOLT)/ SENSITIVITY;
   //coeff
   if (fwdPower > MIN_POWER) {
@@ -213,6 +219,11 @@ String processor(const String& var){
     protectionStateValue = protectionState;
     return "<label class=\"switch\"><input type=\"checkbox\" onchange=\"toggleProtectionCheckbox(this)\" id=\"protectionStateOutput\" " + protectionStateValue + "><span class=\"slider\"></span></label>";
   }
+
+  else if(var == "TVERTNBUTTON"){
+    tvertStateValue = tvertState;
+    return "<label class=\"switch\"><input type=\"checkbox\" onchange=\"toggleTvertCheckbox(this)\" id=\"tvertStateOutput\" " + tvertStateValue + "><span class=\"slider\"></span></label>";
+  }
   return String();
 }
 
@@ -236,7 +247,7 @@ String menu_processor(const String& var){
     return String(basePWMValue);
   }
   else if(var == "DEFAULTENABLED"){
-    return String(powerEnabled);
+    return String(defaultEnabled);
   }
   else if(var == "WEBTIMERDELAY"){
     return String(webTimerDelay);
@@ -276,6 +287,16 @@ String outputProtectionState(){
   return "";
 }
 
+String outputTvertState(){
+  if(tvertEnabled){
+    return "checked";
+  }
+  else {
+    return "";
+  }
+  return "";
+}
+
 const char index_html[] PROGMEM = R"rawliteral(
   %HEADER%
   <body>
@@ -301,6 +322,10 @@ const char index_html[] PROGMEM = R"rawliteral(
         <div class="card">
           <p><i class="fas" style="color:#059e8a;"></i> PROTECTION</p><p><span class="reading"></span></p>
           %PROTECTIONBUTTON%
+        </div>
+        <div class="card">
+          <p><i class="fas" style="color:#059e8a;"></i> TRANSVERTER PTT</p><p><span class="reading"></span></p>
+          %TVERTNBUTTON%
         </div>
         <div class="card">
           <p><i class="fas" style="color:#059e8a;"></i> CURRENT</p><p><span class="reading"><span id="current">%CURRENT%</span> A</span></p>
@@ -398,6 +423,12 @@ const char index_html[] PROGMEM = R"rawliteral(
     else { xhr.open("GET", "/update?protectionState=0", true); }
     xhr.send();
   }
+  function toggleTvertCheckbox(element) {
+    var xhr = new XMLHttpRequest();
+    if(element.checked){ xhr.open("GET", "/update?tvertState=1", true); }
+    else { xhr.open("GET", "/update?tvertState=0", true); }
+    xhr.send();
+  }
 
   setInterval(function ( ) {
     var xhttp = new XMLHttpRequest();
@@ -418,6 +449,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     xhttp.open("GET", "/powerState", true);
     xhttp.send();
   }, 500);
+
   setInterval(function ( ) {
     var xhttp = new XMLHttpRequest();
     xhttp.onreadystatechange = function() {
@@ -435,6 +467,26 @@ const char index_html[] PROGMEM = R"rawliteral(
       }
     };
     xhttp.open("GET", "/protectionState", true);
+    xhttp.send();
+  }, 500);
+
+  setInterval(function ( ) {
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        var inputChecked;
+        if( this.responseText == 1){ 
+          inputChecked = true;
+          console.log("Transverter", "on");
+        }
+        else { 
+          inputChecked = false;
+          console.log("Transverter", "off");
+        }
+        document.getElementById("tvertStateOutput").checked = inputChecked;
+      }
+    };
+    xhttp.open("GET", "/tvertState", true);
     xhttp.send();
   }, 500);
   </script>
@@ -514,13 +566,18 @@ void setup() {
   maxSWR = preferences.getFloat("maxSWR", 2.0);
   minCoeff = preferences.getInt("minCoeff", 44);
   basePWMValue = preferences.getInt("basePWMValue", 70);
-  powerEnabled = preferences.getBool("defaultEnabled", 0);
+  defaultEnabled = preferences.getBool("defaultEnabled", 0);
+  powerEnabled = defaultEnabled;
   protectionEnabled = preferences.getBool("protectionEnabled", 1);
   maxPWMPTT = preferences.getBool("maxPWMPTT", 0);
   webTimerDelay = preferences.getInt("webTimerDelay", 500);
   guardTimerDelay = preferences.getInt("guardTimerDelay", 50);
   guardTempDelay = preferences.getInt("guardTempDelay", 8000);
   inputVoltage = preferences.getFloat("inputVoltage", 13.8);
+  tvertEnabled = preferences.getBool("tvertEnabled", 0);
+  tvertState = tvertEnabled; //check this stuff and remove
+  digitalWrite(XVERT_PIN, tvertEnabled);
+
     ArduinoOTA
     .onStart([]() {
       String type;
@@ -554,7 +611,7 @@ void setup() {
   pinMode(AMP_POWER, OUTPUT);
   digitalWrite(AMP_POWER, powerEnabled);
   pinMode(PTT_PIN, INPUT); 
-  pinMode(HALL_PIN, INPUT);
+  pinMode(XVERT_PIN, OUTPUT);
 
   const int MAX_DUTY_CYCLE = (int)(pow(2, PWM_RESOLUTION) - 1);
   ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
@@ -584,6 +641,10 @@ void setup() {
     request->send(200, "text/plain", String(protectionEnabled).c_str());
   });
 
+  server.on("/tvertState", HTTP_GET, [] (AsyncWebServerRequest *request) {
+    request->send(200, "text/plain", String(tvertEnabled).c_str());
+  });
+
   server.on("/update", HTTP_GET, [] (AsyncWebServerRequest *request) {
     if (request->hasParam(PARAM_INPUT_1)) {
       inputMessage = request->getParam(PARAM_INPUT_1)->value();
@@ -600,6 +661,15 @@ void setup() {
       protectionEnabled = !protectionEnabled;
       preferences.begin("file", false);
       preferences.putBool("protectionEnabled", protectionEnabled);
+      preferences.end();
+    }
+    if (request->hasParam(PARAM_INPUT_3)) {
+      inputMessage = request->getParam(PARAM_INPUT_3)->value();
+      inputParam = PARAM_INPUT_3;
+      digitalWrite(XVERT_PIN, inputMessage.toInt());
+      tvertEnabled = !tvertEnabled;
+      preferences.begin("file", false);
+      preferences.putBool("tvertEnabled", tvertEnabled);
       preferences.end();
     }
     request->send(200, "text/plain", "OK");
@@ -727,14 +797,6 @@ void setup() {
 }
 
 void loop() {
-  if ((digitalRead(PTT_PIN)) && maxPWMPTT) {
-    ledcWrite(PWM_CHANNEL, 255);
-    PWMValue = 255;
-  }
-  else {
-    ledcWrite(PWM_CHANNEL, PWMValue);
-  }
-
   ArduinoOTA.handle();
 
   //temp delay
@@ -744,16 +806,25 @@ void loop() {
     events.send(String(temp1).c_str(),"temp1",millis());
     tempLastTime = millis();
     //set pwm based on temp
-    zeroTemp = (int)temp1 - 25;
+    zeroTemp = (int)temp1 - 26;
     if (zeroTemp < 1) { zeroTemp = 1; } else if (zeroTemp > 35) { zeroTemp = 35; }
     PWMValue = zeroTemp * 10 + basePWMValue;
-    if (PWMValue > 255) { PWMValue = 255; }
-    ledcWrite(PWM_CHANNEL, PWMValue);
+    if (PWMValue >= 240) { PWMValue = 255; }
+    if (!(digitalRead(PTT_PIN))) {
+      ledcWrite(PWM_CHANNEL, PWMValue);
+    }
   }
 
   //protection delay
   if ((millis() - guardLastTime) > guardTimerDelay) {
     getSensorReadings();
+
+    if ((digitalRead(PTT_PIN)) && maxPWMPTT) {
+      ledcWrite(PWM_CHANNEL, 255);
+    }
+    else {
+      ledcWrite(PWM_CHANNEL, PWMValue);
+    }
 
     if((SWR > maxSWR) && (protectionEnabled)) {
       if (alarmatick > 3) {
@@ -838,6 +909,7 @@ void loop() {
     }
     events.send(String(powerState).c_str(),"powerstate",millis());
     events.send(String(protectionState).c_str(),"protectionstate",millis());
+    events.send(String(tvertState).c_str(),"tvertstate",millis());
     events.send(String(current).c_str(),"current",millis());
     events.send(String(alarmType).c_str(),"alarma",millis());
     //events.send(String(PWMValue).c_str(),"PWMValue",millis());
