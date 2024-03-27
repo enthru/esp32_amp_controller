@@ -817,6 +817,9 @@ void loop() {
 
   //protection delay
   if ((millis() - guardLastTime) > guardTimerDelay) {
+    //just to test
+    digitalWrite(XVERT_PIN, tvertEnabled);
+    //
     getSensorReadings();
 
     if ((digitalRead(PTT_PIN)) && maxPWMPTT) {
