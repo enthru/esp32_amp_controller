@@ -120,7 +120,7 @@ void getSensorReadings(){
   squareVoltage = realVoltage*realVoltage;
   refPower = (squareVoltage/50)*0.7;
   if (fwdPower > MIN_POWER) {
-    SWR = (fwdPower+refPower)/(fwdPower-refPower);
+    SWR = (1+sqrt(refPower/fwdPower))/(1-sqrt(refPower/fwdPower));
   }
   else {
     SWR = 0;
