@@ -33,11 +33,10 @@ float powerCoeff = 0.00;
 
 bool powerEnabled;
 bool defaultEnabled;
-bool protectionEnabled;
+bool protectionEnabled = true;
 bool tvertEnabled;
 
 String powerState = "unknown";
-String protectionState = "unknown";
 String tvertState = "unknown";
 
 bool alarma = false;
@@ -74,7 +73,6 @@ float current = 0.00;
 float adcVoltage = 0.00;
 
 const char* PARAM_INPUT_1 = "powerState";
-const char* PARAM_INPUT_2 = "protectionState";
 const char* PARAM_INPUT_3 = "tvertState";
 
 //temp1
@@ -100,7 +98,6 @@ unsigned int guardTempDelay;
 
 //checkbox with powerbutton
 String powerStateValue;
-String protectionStateValue;
 String tvertStateValue;
 
 //webserver update
@@ -215,11 +212,6 @@ String processor(const String& var){
     return "<label class=\"switch\"><input type=\"checkbox\" onchange=\"togglePowerCheckbox(this)\" id=\"powerStateOutput\" " + powerStateValue + "><span class=\"slider\"></span></label>";
   }
 
-  else if(var == "PROTECTIONBUTTON"){
-    protectionStateValue = protectionState;
-    return "<label class=\"switch\"><input type=\"checkbox\" onchange=\"toggleProtectionCheckbox(this)\" id=\"protectionStateOutput\" " + protectionStateValue + "><span class=\"slider\"></span></label>";
-  }
-
   else if(var == "TVERTNBUTTON"){
     tvertStateValue = tvertState;
     return "<label class=\"switch\"><input type=\"checkbox\" onchange=\"toggleTvertCheckbox(this)\" id=\"tvertStateOutput\" " + tvertStateValue + "><span class=\"slider\"></span></label>";
@@ -277,16 +269,6 @@ String outputPowerState(){
   return "";
 }
 
-String outputProtectionState(){
-  if(protectionEnabled){
-    return "checked";
-  }
-  else {
-    return "";
-  }
-  return "";
-}
-
 String outputTvertState(){
   if(tvertEnabled){
     return "checked";
@@ -318,10 +300,6 @@ const char index_html[] PROGMEM = R"rawliteral(
         <div class="card">
           <p><i class="fas" style="color:#059e8a;"></i> POWER</p><p><span class="reading"></span></p>
           %POWERBUTTON%
-        </div>
-        <div class="card">
-          <p><i class="fas" style="color:#059e8a;"></i> PROTECTION</p><p><span class="reading"></span></p>
-          %PROTECTIONBUTTON%
         </div>
         <div class="card">
           <p><i class="fas" style="color:#059e8a;"></i> TRANSVERTER PTT</p><p><span class="reading"></span></p>
@@ -417,12 +395,6 @@ const char index_html[] PROGMEM = R"rawliteral(
     xhr.send();
   }
 
-  function toggleProtectionCheckbox(element) {
-    var xhr = new XMLHttpRequest();
-    if(element.checked){ xhr.open("GET", "/update?protectionState=1", true); }
-    else { xhr.open("GET", "/update?protectionState=0", true); }
-    xhr.send();
-  }
   function toggleTvertCheckbox(element) {
     var xhr = new XMLHttpRequest();
     if(element.checked){ xhr.open("GET", "/update?tvertState=1", true); }
@@ -447,26 +419,6 @@ const char index_html[] PROGMEM = R"rawliteral(
       }
     };
     xhttp.open("GET", "/powerState", true);
-    xhttp.send();
-  }, 500);
-
-  setInterval(function ( ) {
-    var xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-      if (this.readyState == 4 && this.status == 200) {
-        var inputChecked;
-        if( this.responseText == 1){ 
-          inputChecked = true;
-          console.log("Protection", "on");
-        }
-        else { 
-          inputChecked = false;
-          console.log("Protection", "off");
-        }
-        document.getElementById("protectionStateOutput").checked = inputChecked;
-      }
-    };
-    xhttp.open("GET", "/protectionState", true);
     xhttp.send();
   }, 500);
 
@@ -570,7 +522,7 @@ void setup() {
   powerEnabled = defaultEnabled;
   protectionEnabled = preferences.getBool("protectionEnabled", 1);
   maxPWMPTT = preferences.getBool("maxPWMPTT", 0);
-  webTimerDelay = preferences.getInt("webTimerDelay", 500);
+  webTimerDelay = preferences.getInt("webTimerDelay", 1000);
   guardTimerDelay = preferences.getInt("guardTimerDelay", 50);
   guardTempDelay = preferences.getInt("guardTempDelay", 8000);
   inputVoltage = preferences.getFloat("inputVoltage", 13.8);
@@ -637,10 +589,6 @@ void setup() {
     request->send(200, "text/plain", String(digitalRead(AMP_POWER)).c_str());
   });
 
-  server.on("/protectionState", HTTP_GET, [] (AsyncWebServerRequest *request) {
-    request->send(200, "text/plain", String(protectionEnabled).c_str());
-  });
-
   server.on("/tvertState", HTTP_GET, [] (AsyncWebServerRequest *request) {
     request->send(200, "text/plain", String(tvertEnabled).c_str());
   });
@@ -654,14 +602,6 @@ void setup() {
       alarma = false;
       alarmatick = 0;
       alarmType = "none";
-    } 
-    if (request->hasParam(PARAM_INPUT_2)) {
-      inputMessage = request->getParam(PARAM_INPUT_2)->value();
-      inputParam = PARAM_INPUT_2;
-      protectionEnabled = !protectionEnabled;
-      preferences.begin("file", false);
-      preferences.putBool("protectionEnabled", protectionEnabled);
-      preferences.end();
     }
     if (request->hasParam(PARAM_INPUT_3)) {
       inputMessage = request->getParam(PARAM_INPUT_3)->value();
@@ -888,10 +828,9 @@ void loop() {
     char buf[30];
     sprintf(buf,"Uptime: %02d:%02d:%02d PWM: %d",runHours,runMinutes,runSeconds,PWMValue);
     getSensorReadings();
-    events.send("ping",NULL,millis());
     events.send(String(buf).c_str(),"headerinfo",millis());
     events.send(String(fwdPower).c_str(),"forward",millis());
-    events.send(String(refPower).c_str(),"reflected",millis());
+    /*events.send(String(refPower).c_str(),"reflected",millis());
     if (alarma) {
       events.send(String("#FF0000").c_str(),"alarmacolor",millis());
     }
@@ -903,7 +842,7 @@ void loop() {
     }
     else {
       events.send(String("#50B8B4").c_str(),"navcolor",millis());
-    }
+    }*/
     if (SWR == 0.0) {
       events.send(String("Unknown").c_str(),"SWR",millis());    
     }
@@ -911,11 +850,10 @@ void loop() {
       events.send(String(SWR).c_str(),"SWR",millis());
     }
     events.send(String(powerState).c_str(),"powerstate",millis());
-    events.send(String(protectionState).c_str(),"protectionstate",millis());
     events.send(String(tvertState).c_str(),"tvertstate",millis());
     events.send(String(current).c_str(),"current",millis());
     events.send(String(alarmType).c_str(),"alarma",millis());
-    //events.send(String(PWMValue).c_str(),"PWMValue",millis());
+    events.send(String(PWMValue).c_str(),"PWMValue",millis());
     if (powerCoeff == 100.0) {
       events.send(String("Unknown").c_str(),"powerCoeff",millis());
     }
