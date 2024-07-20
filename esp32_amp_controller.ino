@@ -10,6 +10,9 @@
 #include <ArduinoOTA.h>
 #include <Preferences.h>
 
+#include <esp_task_wdt.h>
+#define WDT_TIMEOUT   3   
+
 Preferences preferences;
 WiFiManager wifiManager;
 
@@ -29,7 +32,6 @@ int16_t adc1;
 int16_t adc2;
 String strRefVoltage;
 String strSWR;
-float powerCoeff = 0.00;
 
 bool powerEnabled;
 bool defaultEnabled;
@@ -56,7 +58,6 @@ float inputVoltage;
 #define MIN_POWER 1.0
 float maxCurrent;
 float maxSWR;
-int minCoeff;
 int alarmaTickTimer;
 bool changed = true;
 int PWMValue;
@@ -127,13 +128,6 @@ void getSensorReadings(){
   adc2 = ads.readADC_SingleEnded(2);
   adcVoltage = adc2 * VOLT_PER_COUNT;
   current = (adcVoltage - OFFSET_VOLT)/ SENSITIVITY;
-  //coeff
-  if (fwdPower > MIN_POWER) {
-    powerCoeff = (fwdPower + refPower)/(inputVoltage*current)*100;
-  }
-  else {
-    powerCoeff = 100;
-  }
 }
 
 const char header_html[] PROGMEM = R"rawliteral(
@@ -185,19 +179,11 @@ String processor(const String& var){
       return String("None");
     }
   }
-  else if(var == "COEFF"){
-    if (alarma){
-      return String(powerCoeff);
-    }
-  }
   else if(var == "ALARMATICKTIMER"){
     return String(alarmaTickTimer);
   }
   else if(var == "MAXCURRENT"){
     return String(maxCurrent);
-  }
-  else if(var == "MINCOEFF"){
-    return String(minCoeff);
   }
   else if(var == "MAXSWR"){
     return String(maxSWR);
@@ -228,9 +214,6 @@ String menu_processor(const String& var){
   }
   else if(var == "MAXCURRENT"){
     return String(maxCurrent);
-  }
-  else if(var == "MINCOEFF"){
-    return String(minCoeff);
   }
   else if(var == "MAXSWR"){
     return String(maxSWR);
@@ -289,10 +272,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     <div class="content">
       <div class="cards">
         <div class="card">
-          <p><i class="fas" style="color:#059e8a;"></i> FORWARD</p><p><span class="reading"><span id="fwd">%FORWARD%</span> W</span></p>
-        </div>
-        <div class="card">
-          <p><i class="fas" style="color:#00add6;"></i> REFLECTED</p><p><span class="reading"><span id="ref">%REFLECTED%</span> W</span></p>
+          <p><i class="fas" style="color:#059e8a;"></i> POWER</p><p><span class="reading"><span id="fwd">%FORWARD%</span> W</span></p>
         </div>
         <div class="card">
           <p><i class="fas" style="color:#e1e437;"></i> SWR</p><p><span class="reading"><span id="SWR">%SWR%</span></span></p>
@@ -313,9 +293,6 @@ const char index_html[] PROGMEM = R"rawliteral(
         </div>
         <div class="card" id="alarmacolor">
           <p><i class="fas" style="color:#059e8a;"></i> ALARM TYPE</p><p><span class="reading"><span id="alarma">%ALARM%</span></span></p>
-        </div>
-        <div class="card">
-          <p><i class="fas" style="color:#059e8a;"></i> COEFF</p><p><span class="reading"><span id="powerCoeff">%COEFF%</span> %</span></p>
         </div>
       </div>
       <br><a href="/menu.html">Enter menu</a>
@@ -375,11 +352,6 @@ const char index_html[] PROGMEM = R"rawliteral(
 
   source.addEventListener('alarmacolor', function(e) {
     document.getElementById("alarmacolor").style.backgroundColor = e.data;
-  }, false);
-
-  source.addEventListener('powerCoeff', function(e) {
-    console.log("powerCoeff", e.data);
-    document.getElementById("powerCoeff").innerHTML = e.data;
   }, false);
 
   source.addEventListener('temp1', function(e) {
@@ -456,9 +428,6 @@ const char menu_html[] PROGMEM = R"rawliteral(
           <p>Max current: <input type="text" name="maxCurrent" id="maxCurrent" value="%MAXCURRENT%"> <input type="submit" value="Submit"></p>
         </form>
         <form action="/get">
-          <p>Min coeff: <input type="text" name="minCoeff" id="minCoeff" value="%MINCOEFF%"> <input type="submit" value="Submit"></p>
-        </form>
-        <form action="/get">
           <p>Max SWR: <input type="text" name="maxSWR" id="maxSWR" value="%MAXSWR%"> <input type="submit" value="Submit"></p>
         </form>
         <form action="/get">
@@ -469,9 +438,6 @@ const char menu_html[] PROGMEM = R"rawliteral(
         </form>
         <form action="/get">
           <p>Max PWM on PTT: <input type="text" name="maxPWMPTT" id="maxPWMPTT" value="%MAXPWMPTT%"> <input type="submit" value="Submit"></p>
-        </form>
-        <form action="/get">
-          <p>Voltage to calculate coeff: <input type="text" name="inputVoltage" id="inputVoltage" value="%INPUTVOLTAGE%"> <input type="submit" value="Submit"></p>
         </form>
         <p>Timers and delays in milliseconds: </p>
         <form action="/get">
@@ -516,7 +482,6 @@ void setup() {
   alarmaTickTimer = preferences.getInt("alarmaTickTimer", 1000);
   maxCurrent = preferences.getFloat("maxCurrent", 17.0);
   maxSWR = preferences.getFloat("maxSWR", 2.0);
-  minCoeff = preferences.getInt("minCoeff", 44);
   basePWMValue = preferences.getInt("basePWMValue", 70);
   defaultEnabled = preferences.getBool("defaultEnabled", 0);
   powerEnabled = defaultEnabled;
@@ -538,7 +503,6 @@ void setup() {
       else // U_SPIFFS
         type = "filesystem";
 
-      // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
       Serial.println("Start updating " + type);
     })
     .onEnd([]() {
@@ -651,14 +615,6 @@ void setup() {
       preferences.putFloat("maxSWR", inputMessage.toFloat());
       preferences.end();
     }
-    else if (request->hasParam("minCoeff")) {
-      inputMessage = request->getParam("minCoeff")->value();
-      inputParam = "minCoeff";
-      minCoeff = inputMessage.toInt();
-      preferences.begin("file", false);
-      preferences.putInt("minCoeff", inputMessage.toInt());
-      preferences.end();
-    }
     else if (request->hasParam("basePWMValue")) {
       inputMessage = request->getParam("basePWMValue")->value();
       inputParam = "basePWMValue";
@@ -739,6 +695,7 @@ void setup() {
 void loop() {
   ArduinoOTA.handle();
 
+
   //temp delay
   if ((millis() - tempLastTime) > guardTempDelay) {
     sensors.requestTemperatures();
@@ -757,11 +714,7 @@ void loop() {
 
   //protection delay
   if ((millis() - guardLastTime) > guardTimerDelay) {
-    //just to test
-    digitalWrite(XVERT_PIN, tvertEnabled);
-    //
     getSensorReadings();
-
     if ((digitalRead(PTT_PIN)) && maxPWMPTT) {
       ledcWrite(PWM_CHANNEL, 255);
     }
@@ -773,6 +726,7 @@ void loop() {
       if (alarmatick > 3) {
         digitalWrite(AMP_POWER, LOW);
         powerEnabled = false;
+        events.send(String(powerState).c_str(),"powerstate",millis());
         alarma = true;
         events.send(String("#FF0000").c_str(),"alarmacolor",millis());
         alarmType = "SWR: " + String(SWR);
@@ -787,6 +741,7 @@ void loop() {
       if (alarmatick > 3) {
         digitalWrite(AMP_POWER, LOW);
         powerEnabled = false;
+        events.send(String(powerState).c_str(),"powerstate",millis());
         alarma = true;
         events.send(String("#FF0000").c_str(),"alarmacolor",millis());
         alarmType = "Current: "+ String(current);
@@ -796,20 +751,6 @@ void loop() {
       alarmType = "F! Current: "+ String(current);
       Serial.println("F! Overcurrent Alarm! Current: " + String(current));
     }
-
-    if ((powerCoeff < minCoeff) && (protectionEnabled)){
-      if (alarmatick > 3) {
-        digitalWrite(AMP_POWER, LOW);
-        powerEnabled = false;
-        alarma = true;
-        events.send(String("#FF0000").c_str(),"alarmacolor",millis());
-        alarmType = "Coeff: " + String(powerCoeff);
-        Serial.println("Powercoeff Alarm! Coeff: " + String(powerCoeff));
-      }
-      alarmatick++;
-      alarmType = "F! Coeff: " + String(powerCoeff);
-      Serial.println("F! Powercoeff Alarm! Coeff: " + String(powerCoeff));
-    } 
     guardLastTime = millis();
   }
 
@@ -830,7 +771,7 @@ void loop() {
     getSensorReadings();
     events.send(String(buf).c_str(),"headerinfo",millis());
     events.send(String(fwdPower).c_str(),"forward",millis());
-    /*events.send(String(refPower).c_str(),"reflected",millis());
+    /*
     if (alarma) {
       events.send(String("#FF0000").c_str(),"alarmacolor",millis());
     }
@@ -849,17 +790,11 @@ void loop() {
     else {
       events.send(String(SWR).c_str(),"SWR",millis());
     }
-    events.send(String(powerState).c_str(),"powerstate",millis());
-    events.send(String(tvertState).c_str(),"tvertstate",millis());
+    //don't update status every time, we don't need it
+    //events.send(String(powerState).c_str(),"powerstate",millis());
+    //events.send(String(tvertState).c_str(),"tvertstate",millis());
     events.send(String(current).c_str(),"current",millis());
     events.send(String(alarmType).c_str(),"alarma",millis());
-    events.send(String(PWMValue).c_str(),"PWMValue",millis());
-    if (powerCoeff == 100.0) {
-      events.send(String("Unknown").c_str(),"powerCoeff",millis());
-    }
-    else {
-      events.send(String(powerCoeff).c_str(),"powerCoeff",millis());
-    }
     webLastTime = millis();
   }
 }
